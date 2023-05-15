@@ -1,0 +1,90 @@
+import gym
+# import ale_py
+
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense,Flatten,Activation,Convolution2D,Permute
+from tensorflow.keras.optimizers import Adam
+
+from rl.core import Processor
+from rl.memory import SequentialMemory
+from rl.policy import LinearAnnealedPolicy,EpsGreedyQPolicy
+from rl.agents.dqn import DQNAgent
+from rl.callbacks import FileLogger, ModelIntervalCheckpoint
+
+
+from rl.policy import GreedyQPolicy
+
+env = gym.make("ALE/Breakout-v5",render_mode='human')
+
+# img = Image.fromarray(observation[0])
+# img = img.resize(img_shape)
+# img = img.convert('L')
+
+nb_actions = env.action_space.n
+img_shape = (84,84)
+window_length = 4
+# env = env.reset()
+from PIL import Image
+import numpy as np
+
+class ImageProcessor(Processor):
+    def process_observation(self, observation):
+        img = Image.fromarray(observation)
+        img = img.resize(img_shape)
+        img = img.convert('L')
+        return np.array(img).astype('uint8')
+
+input_shape = (window_length,img_shape[0],img_shape[1])
+
+# Network
+weights_file_name= 'DQN_BREAK.h5f'
+checkpoint_file_name = 'DQN_checkpoint.h5f'
+
+checkpoint_callback = ModelIntervalCheckpoint(checkpoint_file_name,interval=10000)
+model = Sequential()
+
+model.add(Permute((2,3,1),input_shape = input_shape))
+
+model.add(Convolution2D(filters=32,kernel_size=(8,8),strides=(4,4),padding='same'))
+model.add(Activation('relu'))
+
+model.add(Convolution2D(filters=64,kernel_size=(4,4),strides=(2,2)))
+model.add(Activation('relu'))
+
+model.add(Convolution2D(filters=128,kernel_size=(2,2),strides=(1,1)))
+model.add(Activation('relu'))
+
+model.add(Flatten())
+
+model.add(Dense(512))
+model.add(Activation('relu'))
+
+model.add(Dense(4))
+model.add(Activation('linear'))
+
+
+memory = SequentialMemory(limit=1000000,window_length=window_length)
+
+processor = ImageProcessor()
+
+policy = LinearAnnealedPolicy(EpsGreedyQPolicy(),
+                             attr='eps',
+                             value_max=1.0,
+                             value_min=0.01,
+                             value_test=0.05,
+                             nb_steps=100)
+
+
+agent = DQNAgent(model=model,
+                policy=policy,
+                memory = memory,
+                processor=processor,
+                nb_actions = nb_actions,
+                nb_steps_warmup = 1000002,
+                gamma = 0.9,
+                target_model_update=15000,
+                )
+
+agent.compile(Adam(learning_rate=0.01),metrics=['mae'])
+agent.load_weights('DQN_checkpoint.h5f')
+agent.fit(env,nb_steps=150000,log_interval=2500,visualize=False,callbacks= [checkpoint_callback])
